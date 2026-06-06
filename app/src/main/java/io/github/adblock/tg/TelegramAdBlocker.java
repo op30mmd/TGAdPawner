@@ -43,6 +43,7 @@ public class TelegramAdBlocker extends XposedModule {
         hookGetSponsoredMessages(cl);
         hookBotAdView(cl);
         hookExtraSponsoredSurfaces(cl);
+        hookPromoSponsor(cl);
 
         // Comment this out in a release build — it's noisy.
         // new AdDiagnostics(this, TAG).run(cl);
@@ -120,11 +121,34 @@ public class TelegramAdBlocker extends XposedModule {
         // 3) Defensive: if a sponsored cell still gets built, keep it hidden.
         safeHookByName(cl, "org.telegram.ui.Cells.ChatMessageCell",
                 "setSponsoredMessageVisible", chain -> null);
+    }
 
-        // 4) OPTIONAL — also removes the proxy/PSA promo dialog pinned atop the
-        //    chat list. Comment out if you want to keep PSA/proxy sponsors.
+    private void hookPromoSponsor(ClassLoader cl) {
+        // 1) Stop the promo/proxy-sponsor dialog from ever being fetched or added.
+        safeHookByName(cl, "org.telegram.messenger.MessagesController",
+                "checkPromoInfo", chain -> null);          // void: skip
+        safeHookByName(cl, "org.telegram.messenger.MessagesController",
+                "checkPromoInfoInternal", chain -> null);  // void: skip
+
+        // 2) Keep this too (harmless), in case any cell still queries it.
         safeHookByName(cl, "org.telegram.messenger.MessagesController",
                 "isPromoDialog", chain -> Boolean.FALSE);
+
+        // 3) Evict an already-cached/persisted promo dialog on every account.
+        try {
+            Class<?> mc = cl.loadClass("org.telegram.messenger.MessagesController");
+            java.lang.reflect.Method getInstance = mc.getMethod("getInstance", int.class);
+            java.lang.reflect.Method removePromo  = mc.getDeclaredMethod("removePromoDialog");
+            for (int a = 0; a < 8; a++) {                  // covers MAX_ACCOUNT_COUNT
+                try {
+                    Object inst = getInstance.invoke(null, a);
+                    if (inst != null) removePromo.invoke(inst);
+                } catch (Throwable ignore) { }
+            }
+            log(Log.INFO, TAG, "Cleared cached promo dialogs");
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "removePromoDialog cleanup failed", t);
+        }
     }
 
     /** Hooks every overload of a method name with one interceptor. */
