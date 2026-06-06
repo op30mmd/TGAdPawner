@@ -30,7 +30,7 @@ public class TelegramAdBlocker extends XposedModule {
         // Only act on the first (main) classloader of a Telegram package.
         if (!param.getPackageName().startsWith("org.telegram")
                 && !param.getPackageName().equals("org.telegram.plus")
-                && !param.getPackageName().equals("nekox.messenger")
+                && !param.getPackageName().equals("momo.gram")
                 && !param.getPackageName().equals("tw.nekomimi.nekogram")) {
             return;
         }
