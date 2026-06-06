@@ -26,7 +26,7 @@ TGAdPawner is a lightweight and efficient Xposed module designed to remove spons
 
 ## Installation
 
-1. Download the latest `TGAdPawner.apk` from the [Releases](#) page (or build it yourself).
+1. Download the latest `app-release-signed.apk` from the [Releases](https://github.com/op30mmd/TGAdPawner/releases) page (or build it yourself).
 2. Install the APK on your Android device.
 3. Open your Xposed manager (e.g., LSPosed).
 4. Locate **TGAdPawner** in the modules list and enable it.
