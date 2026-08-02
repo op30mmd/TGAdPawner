@@ -44,6 +44,7 @@ public class TelegramAdBlocker extends XposedModule {
         hookBotAdView(cl);
         hookExtraSponsoredSurfaces(cl);
         hookPromoSponsor(cl);
+        hookInlineBotResultWebp(cl);
 
         // Comment this out in a release build — it's noisy.
         // new AdDiagnostics(this, TAG).run(cl);
@@ -105,6 +106,55 @@ public class TelegramAdBlocker extends XposedModule {
         } catch (Throwable t) {
             log(Log.WARN, TAG, "BotAdView hook failed", t);
         }
+    }
+
+    /**
+     * Runs before Telegram consumes SendingMediaInfo.inlineResult.  The method is selected by
+     * name rather than a fixed signature because Telegram forks add parameters between releases.
+     */
+    private void hookInlineBotResultWebp(ClassLoader cl) {
+        try {
+            Class<?> helper = cl.loadClass("org.telegram.messenger.SendMessagesHelper");
+            int hooks = 0;
+            for (Method method : helper.getDeclaredMethods()) {
+                if (!method.getName().equals("sendInlineBotResult")) continue;
+                hook(method).setPriority(XposedInterface.PRIORITY_HIGHEST).intercept(chain -> {
+                    for (Object argument : chain.getArgs()) {
+                        if (argument == null) continue;
+                        // Avoid resolving Telegram's private SendingMediaInfo class by name;
+                        // it is nested in some builds and top-level in others.
+                        if (hasField(argument.getClass(), "inlineResult")) {
+                            InlineResultWebpConverter.prepare(argument,
+                                    new InlineResultWebpConverter.XposedLog() {
+                                        @Override public void info(String message) {
+                                            log(Log.INFO, TAG, message);
+                                        }
+                                        @Override public void warn(String message, Throwable error) {
+                                            log(Log.WARN, TAG, message, error);
+                                        }
+                                    });
+                            break;
+                        }
+                    }
+                    return chain.proceed();
+                });
+                hooks++;
+            }
+            log(Log.INFO, TAG, hooks == 0 ? "NOT FOUND SendMessagesHelper#sendInlineBotResult"
+                    : "Hooked SendMessagesHelper#sendInlineBotResult (" + hooks + " overloads)");
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "Inline WebP hook failed", t);
+        }
+    }
+
+    private static boolean hasField(Class<?> type, String name) {
+        for (Class<?> c = type; c != null; c = c.getSuperclass()) {
+            try {
+                c.getDeclaredField(name);
+                return true;
+            } catch (NoSuchFieldException ignored) { }
+        }
+        return false;
     }
 
     private void hookExtraSponsoredSurfaces(ClassLoader cl) {
