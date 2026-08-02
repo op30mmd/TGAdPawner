@@ -11,6 +11,7 @@ TGAdPawner is a lightweight and efficient Xposed module designed to remove spons
     - **UI Cleanup**: Automatically collapses and hides `BotAdView` components if they attempt to render.
     - **Defensive Hooks**: Suppresses visibility of sponsored cells in chat lists and activities.
 - **Broad Compatibility**: Supports official Telegram, Plus Messenger, and Nekogram.
+- **Inline image WebP conversion**: Hooks `SendMessagesHelper.sendInlineBotResult`, marks inline image results as `image/webp`, and converts an already-downloaded local image payload to WebP before sending.
 - **Performance Focused**: Minimal overhead using efficient hook points.
 - **Built with libXposed**: Modern Xposed API compatibility (requires a libXposed-compatible manager like LSPosed).
 
