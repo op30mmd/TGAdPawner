@@ -45,9 +45,6 @@ public class TelegramAdBlocker extends XposedModule {
         hookExtraSponsoredSurfaces(cl);
         hookPromoSponsor(cl);
         hookInlineBotResultWebp(cl);
-
-        // Comment this out in a release build — it's noisy.
-        // new AdDiagnostics(this, TAG).run(cl);
     }
 
     /* ---------- Layer 1: pretend nothing is sponsored ---------- */
@@ -109,39 +106,54 @@ public class TelegramAdBlocker extends XposedModule {
     }
 
     /**
-     * Runs before Telegram consumes SendingMediaInfo.inlineResult.  The method is selected by
-     * name rather than a fixed signature because Telegram forks add parameters between releases.
+     * Runs before Telegram consumes inline bot results. Hook covers the legacy 'sendInlineBotResult'
+     * alongside new equivalents 'prepareSendingBotContextResult' and 'prepareSendingMedia'.
      */
     private void hookInlineBotResultWebp(ClassLoader cl) {
         try {
             Class<?> helper = cl.loadClass("org.telegram.messenger.SendMessagesHelper");
             int hooks = 0;
             for (Method method : helper.getDeclaredMethods()) {
-                if (!method.getName().equals("sendInlineBotResult")) continue;
+                String name = method.getName();
+                if (!name.equals("sendInlineBotResult") && 
+                    !name.equals("prepareSendingBotContextResult") && 
+                    !name.equals("prepareSendingMedia")) {
+                    continue;
+                }
+                
                 hook(method).setPriority(XposedInterface.PRIORITY_HIGHEST).intercept(chain -> {
+                    InlineResultWebpConverter.XposedLog converterLog = new InlineResultWebpConverter.XposedLog() {
+                        @Override public void info(String message) { log(Log.INFO, TAG, message); }
+                        @Override public void warn(String message, Throwable error) { log(Log.WARN, TAG, message, error); }
+                    };
+
                     for (Object argument : chain.getArgs()) {
                         if (argument == null) continue;
-                        // Avoid resolving Telegram's private SendingMediaInfo class by name;
-                        // it is nested in some builds and top-level in others.
-                        if (hasField(argument.getClass(), "inlineResult")) {
-                            InlineResultWebpConverter.prepare(argument,
-                                    new InlineResultWebpConverter.XposedLog() {
-                                        @Override public void info(String message) {
-                                            log(Log.INFO, TAG, message);
-                                        }
-                                        @Override public void warn(String message, Throwable error) {
-                                            log(Log.WARN, TAG, message, error);
-                                        }
-                                    });
+                        
+                        // Handled by prepareSendingMedia (passes an ArrayList<SendingMediaInfo>)
+                        if (argument instanceof java.util.ArrayList) {
+                            for (Object item : (java.util.ArrayList<?>) argument) {
+                                if (item != null && hasField(item.getClass(), "inlineResult")) {
+                                    InlineResultWebpConverter.prepare(item, converterLog);
+                                }
+                            }
+                        }
+                        // Handled by older versions passing SendingMediaInfo directly
+                        else if (hasField(argument.getClass(), "inlineResult")) {
+                            InlineResultWebpConverter.prepare(argument, converterLog);
                             break;
+                        }
+                        // Handled by prepareSendingBotContextResult (passes BotInlineResult directly)
+                        else if (argument.getClass().getName().endsWith("BotInlineResult")) {
+                            InlineResultWebpConverter.prepareBotInlineResult(argument, converterLog);
                         }
                     }
                     return chain.proceed();
                 });
                 hooks++;
             }
-            log(Log.INFO, TAG, hooks == 0 ? "NOT FOUND SendMessagesHelper#sendInlineBotResult"
-                    : "Hooked SendMessagesHelper#sendInlineBotResult (" + hooks + " overloads)");
+            log(Log.INFO, TAG, hooks == 0 ? "NOT FOUND SendMessagesHelper inline bot methods"
+                    : "Hooked SendMessagesHelper inline bot result (" + hooks + " overloads)");
         } catch (Throwable t) {
             log(Log.WARN, TAG, "Inline WebP hook failed", t);
         }
@@ -158,38 +170,22 @@ public class TelegramAdBlocker extends XposedModule {
     }
 
     private void hookExtraSponsoredSurfaces(ClassLoader cl) {
-        // 1) Master switch — pretend sponsored is globally disabled.
-        safeHookByName(cl, "org.telegram.messenger.MessagesController",
-                "isSponsoredDisabled", chain -> Boolean.TRUE);
-
-        // 2) Channel message-list path: never insert, count is always zero.
-        safeHookByName(cl, "org.telegram.ui.ChatActivity",
-                "getSponsoredMessagesCount", chain -> Integer.valueOf(0));
-        safeHookByName(cl, "org.telegram.ui.ChatActivity",
-                "addSponsoredMessages", chain -> null);   // void: skip body
-
-        // 3) Defensive: if a sponsored cell still gets built, keep it hidden.
-        safeHookByName(cl, "org.telegram.ui.Cells.ChatMessageCell",
-                "setSponsoredMessageVisible", chain -> null);
+        safeHookByName(cl, "org.telegram.messenger.MessagesController", "isSponsoredDisabled", chain -> Boolean.TRUE);
+        safeHookByName(cl, "org.telegram.ui.ChatActivity", "getSponsoredMessagesCount", chain -> Integer.valueOf(0));
+        safeHookByName(cl, "org.telegram.ui.ChatActivity", "addSponsoredMessages", chain -> null);
+        safeHookByName(cl, "org.telegram.ui.Cells.ChatMessageCell", "setSponsoredMessageVisible", chain -> null);
     }
 
     private void hookPromoSponsor(ClassLoader cl) {
-        // 1) Stop the promo/proxy-sponsor dialog from ever being fetched or added.
-        safeHookByName(cl, "org.telegram.messenger.MessagesController",
-                "checkPromoInfo", chain -> null);          // void: skip
-        safeHookByName(cl, "org.telegram.messenger.MessagesController",
-                "checkPromoInfoInternal", chain -> null);  // void: skip
+        safeHookByName(cl, "org.telegram.messenger.MessagesController", "checkPromoInfo", chain -> null);
+        safeHookByName(cl, "org.telegram.messenger.MessagesController", "checkPromoInfoInternal", chain -> null);
+        safeHookByName(cl, "org.telegram.messenger.MessagesController", "isPromoDialog", chain -> Boolean.FALSE);
 
-        // 2) Keep this too (harmless), in case any cell still queries it.
-        safeHookByName(cl, "org.telegram.messenger.MessagesController",
-                "isPromoDialog", chain -> Boolean.FALSE);
-
-        // 3) Evict an already-cached/persisted promo dialog on every account.
         try {
             Class<?> mc = cl.loadClass("org.telegram.messenger.MessagesController");
             java.lang.reflect.Method getInstance = mc.getMethod("getInstance", int.class);
             java.lang.reflect.Method removePromo  = mc.getDeclaredMethod("removePromoDialog");
-            for (int a = 0; a < 8; a++) {                  // covers MAX_ACCOUNT_COUNT
+            for (int a = 0; a < 8; a++) {
                 try {
                     Object inst = getInstance.invoke(null, a);
                     if (inst != null) removePromo.invoke(inst);
@@ -201,16 +197,13 @@ public class TelegramAdBlocker extends XposedModule {
         }
     }
 
-    /** Hooks every overload of a method name with one interceptor. */
-    private void safeHookByName(ClassLoader cl, String cls, String method,
-                                XposedInterface.Hooker hooker) {
+    private void safeHookByName(ClassLoader cl, String cls, String method, XposedInterface.Hooker hooker) {
         try {
             Class<?> c = cl.loadClass(cls);
             boolean found = false;
             for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
                 if (m.getName().equals(method)) {
-                    hook(m).setPriority(XposedInterface.PRIORITY_HIGHEST)
-                           .intercept(hooker);
+                    hook(m).setPriority(XposedInterface.PRIORITY_HIGHEST).intercept(hooker);
                     found = true;
                 }
             }
