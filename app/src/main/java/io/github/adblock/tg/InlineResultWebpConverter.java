@@ -29,7 +29,7 @@ final class InlineResultWebpConverter {
             if (content != null) setStringField(content, "mime_type", "image/webp");
 
             // If Telegram has already materialised this inline image, send the WebP file rather
-            // than the original.  A missing path is normal: Telegram will download it later.
+            // than the original. A missing path is normal: Telegram will download it later.
             String path = getStringField(sendingMediaInfo, "path");
             if (path == null || path.length() == 0) path = getStringField(sendingMediaInfo, "filePath");
             if (path != null && replaceWithWebp(sendingMediaInfo, path, log)) {

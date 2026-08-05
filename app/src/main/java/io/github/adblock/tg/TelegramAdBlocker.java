@@ -17,17 +17,14 @@ public class TelegramAdBlocker extends XposedModule {
 
     private static final String TAG = "TGAdBlock";
 
-    // libxposed API 101: no-arg constructor; framework attaches the interface.
     public TelegramAdBlocker() { }
 
     @Override
     public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
-        // Runs in the module's own process. Nothing needed here.
     }
 
     @Override
     public void onPackageLoaded(@NonNull PackageLoadedParam param) {
-        // Only act on the first (main) classloader of a Telegram package.
         if (!param.getPackageName().startsWith("org.telegram")
                 && !param.getPackageName().equals("org.telegram.plus")
                 && !param.getPackageName().equals("momo.gram")
@@ -54,7 +51,7 @@ public class TelegramAdBlocker extends XposedModule {
             Method m = mo.getDeclaredMethod("isSponsored");
             hook(m)
                 .setPriority(XposedInterface.PRIORITY_HIGHEST)
-                .intercept(chain -> Boolean.FALSE);   // skip original, force false
+                .intercept(chain -> Boolean.FALSE);
             log(Log.INFO, TAG, "Hooked MessageObject.isSponsored");
         } catch (Throwable t) {
             log(Log.WARN, TAG, "isSponsored hook failed", t);
@@ -69,9 +66,8 @@ public class TelegramAdBlocker extends XposedModule {
                 if (m.getName().equals("getSponsoredMessages")) {
                     hook(m)
                         .setPriority(XposedInterface.PRIORITY_HIGHEST)
-                        .intercept(chain -> null);   // no sponsored messages available
-                    log(Log.INFO, TAG,
-                            "Hooked getSponsoredMessages " + m);
+                        .intercept(chain -> null);
+                    log(Log.INFO, TAG, "Hooked getSponsoredMessages " + m);
                 }
             }
         } catch (Throwable t) {
@@ -95,7 +91,7 @@ public class TelegramAdBlocker extends XposedModule {
                                 if (lp != null) { lp.height = 0; v.setLayoutParams(lp); }
                             });
                         }
-                        return null;   // never bind the ad content / never log the impression
+                        return null;
                     });
                     log(Log.INFO, TAG, "Hooked BotAdView.set");
                 }
@@ -141,10 +137,10 @@ public class TelegramAdBlocker extends XposedModule {
                         // Handled by older versions passing SendingMediaInfo directly
                         else if (hasField(argument.getClass(), "inlineResult")) {
                             InlineResultWebpConverter.prepare(argument, converterLog);
-                            break;
                         }
                         // Handled by prepareSendingBotContextResult (passes BotInlineResult directly)
-                        else if (argument.getClass().getName().endsWith("BotInlineResult")) {
+                        // Checking field names natively bypasses class name obfuscation/case mismatch
+                        else if (hasField(argument.getClass(), "send_message") && hasField(argument.getClass(), "type")) {
                             InlineResultWebpConverter.prepareBotInlineResult(argument, converterLog);
                         }
                     }
