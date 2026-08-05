@@ -1,15 +1,18 @@
 package io.github.adblock.tg;
 
+import android.os.Build;
 import android.util.Log;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Locale;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
+import org.luckypray.dexkit.DexKitBridge;
 
-/** Read-only reconnaissance: it logs, it does not block. */
+/** Read-only reconnaissance: it logs verbosely, it does not block. */
 class AdDiagnostics {
 
     private final XposedModule x;   // call hook()/log() through the module instance
@@ -38,34 +41,58 @@ class AdDiagnostics {
         "org.telegram.ui.Stories.StoriesController",
     };
 
-    void run(ClassLoader cl) {
-        log("=== Telegram ad diagnostics start ===");
+    void run(ClassLoader cl, String apkPath) {
+        long start = System.currentTimeMillis();
+        logInfo("=== Telegram ad diagnostics start (Verbose Mode) ===");
+        logInfo("[DIAG-ENV] SDK=" + Build.VERSION.SDK_INT + " | Device=" + Build.MANUFACTURER + " " + Build.MODEL);
+
         probeCandidateClasses(cl);
+
+        if (DexKitAdFinder.isLibraryLoaded() && apkPath != null) {
+            logInfo("[DIAG-DEXKIT] Running DexKit ad string reconnaissance...");
+            try (DexKitBridge bridge = DexKitBridge.create(apkPath)) {
+                DexKitAdFinder.runVerboseDiagnostics(bridge, cl, x, tag);
+            } catch (Throwable t) {
+                logWarn("[DIAG-DEXKIT] Diagnostics scan failed", t);
+            }
+        } else {
+            logInfo("[DIAG-DEXKIT] Skipping DexKit scan (native library unavailable)");
+        }
+
         installImpressionTracers(cl);
-        log("=== Telegram ad diagnostics end ===");
+
+        long elapsed = System.currentTimeMillis() - start;
+        logInfo("=== Telegram ad diagnostics end (Elapsed: " + elapsed + " ms) ===");
     }
 
     /* (A) Reflectively dump ad-ish members of known classes. */
     private void probeCandidateClasses(ClassLoader cl) {
+        int foundMethods = 0;
+        int foundFields = 0;
         for (String name : CANDIDATE_CLASSES) {
             try {
                 Class<?> c = cl.loadClass(name);
                 for (Method m : c.getDeclaredMethods()) {
                     if (matches(m.getName())) {
-                        log("METHOD  " + c.getSimpleName() + "#" + m.getName()
-                                + sig(m) + " -> " + m.getReturnType().getSimpleName());
+                        logInfo("[DIAG-REFLECT] METHOD  " + c.getName() + "#" + m.getName()
+                                + sig(m) + " -> " + m.getReturnType().getSimpleName()
+                                + " [modifiers=" + Modifier.toString(m.getModifiers()) + "]");
+                        foundMethods++;
                     }
                 }
                 for (Field f : c.getDeclaredFields()) {
                     if (matches(f.getName())) {
-                        log("FIELD   " + c.getSimpleName() + "#" + f.getName()
-                                + " : " + f.getType().getSimpleName());
+                        logInfo("[DIAG-REFLECT] FIELD   " + c.getName() + "#" + f.getName()
+                                + " : " + f.getType().getSimpleName()
+                                + " [modifiers=" + Modifier.toString(f.getModifiers()) + "]");
+                        foundFields++;
                     }
                 }
             } catch (Throwable ignore) {
                 // class not present in this build/version — fine.
             }
         }
+        logInfo("[DIAG-REFLECT] Candidate class probe completed: " + foundMethods + " methods, " + foundFields + " fields discovered.");
     }
 
     /* (B) Hook impression/click reporters so we see *where* ads are shown. */
@@ -80,33 +107,44 @@ class AdDiagnostics {
     private void traceMethodsNamed(ClassLoader cl, String cls, String method) {
         try {
             Class<?> c = cl.loadClass(cls);
+            int count = 0;
             for (Method m : c.getDeclaredMethods()) {
                 if (!m.getName().equals(method)) continue;
                 x.hook(m)
                  .setPriority(XposedInterface.PRIORITY_LOWEST)
                  .intercept(chain -> {
-                     log("CALLED " + cls + "#" + method
+                     logInfo("[DIAG-TRACE] CALLED " + cls + "#" + method
                              + "\n" + stack());
                      return chain.proceed();   // observe only, do not block
                  });
-                log("Tracing " + cls + "#" + method);
+                count++;
+                logInfo("[DIAG-TRACE] Installed tracer on " + cls + "#" + method + sig(m));
             }
-        } catch (Throwable ignore) { }
+            if (count == 0) {
+                logInfo("[DIAG-TRACE] No methods matching " + cls + "#" + method + " found to trace");
+            }
+        } catch (Throwable ignore) {
+            logInfo("[DIAG-TRACE] Target class not found for tracing: " + cls);
+        }
     }
 
     private void traceConstructors(ClassLoader cl, String cls) {
         try {
             Class<?> c = cl.loadClass(cls);
+            int count = 0;
             for (java.lang.reflect.Constructor<?> ctor : c.getDeclaredConstructors()) {
                 x.hook(ctor)
                  .setPriority(XposedInterface.PRIORITY_LOWEST)
                  .intercept(chain -> {
-                     log("NEW " + cls + "\n" + stack());
+                     logInfo("[DIAG-TRACE] NEW " + cls + "\n" + stack());
                      return chain.proceed();
                  });
+                count++;
             }
-            log("Tracing constructors of " + cls);
-        } catch (Throwable ignore) { }
+            logInfo("[DIAG-TRACE] Tracing " + count + " constructors of " + cls);
+        } catch (Throwable ignore) {
+            logInfo("[DIAG-TRACE] Target class not found for constructor tracing: " + cls);
+        }
     }
 
     /* helpers */
@@ -147,7 +185,18 @@ class AdDiagnostics {
         return b.toString();
     }
 
-    private void log(String msg) {
+    private void logInfo(String msg) {
         x.log(Log.INFO, tag, msg);
+        Log.i(tag, msg);
+    }
+
+    private void logWarn(String msg, Throwable t) {
+        if (t != null) {
+            x.log(Log.WARN, tag, msg, t);
+            Log.w(tag, msg, t);
+        } else {
+            x.log(Log.WARN, tag, msg);
+            Log.w(tag, msg);
+        }
     }
 }

@@ -10,9 +10,10 @@ TGAdPawner is a lightweight and efficient Xposed module designed to remove spons
     - **Data Suppression**: Returns empty results for `getSponsoredMessages` to prevent ad data from ever loading.
     - **UI Cleanup**: Automatically collapses and hides `BotAdView` components if they attempt to render.
     - **Defensive Hooks**: Suppresses visibility of sponsored cells in chat lists and activities.
-- **Broad Compatibility**: Supports official Telegram, Plus Messenger, and Nekogram.
-- **Inline image WebP conversion**: Hooks `SendMessagesHelper.sendInlineBotResult`, marks inline image results as `image/webp`, and converts an already-downloaded local image payload to WebP before sending.
-- **Performance Focused**: Minimal overhead using efficient hook points.
+- **Broad Compatibility & DexKit Engine**: Supports official Telegram, Plus Messenger, Nekogram, and Momogram. Leverages [DexKit](https://github.com/LuckyPray/DexKit) for high-performance DEX parsing and deobfuscation, allowing automatic method and class discovery even across obfuscated Telegram builds, with robust reflection fallbacks.
+- **Verbose Structured Logging**: Emits detailed diagnostic and operational logs (query timings, hook installation statistics, runtime intercept events, and ad-surface reconnaissance) to Xposed/LSPosed logs and Android logcat (`TGAdBlock`).
+- **Inline image WebP conversion**: Hooks `SendMessagesHelper.sendInlineBotResult` and `prepareSendingMedia`, marks inline image results as `image/webp`, and transcodes local image payloads to WebP before sending.
+- **Performance Focused**: Minimal overhead using efficient hook points and fast DexKit string/matcher indexing.
 - **Built with libXposed**: Modern Xposed API compatibility (requires a libXposed-compatible manager like LSPosed).
 
 ## Prerequisites
@@ -48,9 +49,17 @@ To build the module yourself, you will need Android Studio or the Android SDK.
    ```
 3. The generated APK will be located in `app/build/outputs/apk/debug/app-debug.apk`.
 
+## CI & Pull Request Test Signing
+
+TGAdPawner supports automatic test signing for Pull Requests in GitHub Actions:
+- **Release pushes (`main` branch)**: Signed using production release credentials.
+- **Pull Requests & development branches**: Signed automatically using an ephemeral test keystore (`test-debug.keystore`), ensuring that PR artifact APKs are signed and immediately installable on test devices.
+
+> **Note**: A ready-to-use CI workflow template with Pull Request test signing is provided at `ci-template/build.yml`. You can copy it to `.github/workflows/build.yml` (`cp ci-template/build.yml .github/workflows/build.yml`) to activate PR test signing in your repository.
+
 ## How it Works
 
-TGAdPawner hooks into several key points of the Telegram application:
+TGAdPawner hooks into several key points of the Telegram application using a dual-engine architecture (DexKit deobfuscating resolution + reflection fallbacks):
 - **`MessagesController`**: To disable the global advertisement flag.
 - **`MessageObject`**: To mark specific messages as non-sponsored.
 - **`ChatActivity`**: To prevent the insertion of sponsored message counts into the message list.

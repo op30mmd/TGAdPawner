@@ -20,25 +20,35 @@ final class InlineResultWebpConverter {
             Object result = getField(sendingMediaInfo, "inlineResult");
             if (result == null || !isImageResult(result)) return;
 
+            String originalMime = getStringField(result, "mime_type");
+            String type = getStringField(result, "type");
+
             // BotInlineResult fields are mutable in Telegram's TL implementation.
-            setStringField(result, "mime_type", "image/webp");
+            boolean mimeModified = setStringField(result, "mime_type", "image/webp");
 
             // Some versions put the MIME type in result.content instead of the result itself.
             Object content = getField(result, "content");
-            if (content != null) setStringField(content, "mime_type", "image/webp");
+            if (content != null) {
+                mimeModified |= setStringField(content, "mime_type", "image/webp");
+            }
 
             // If Telegram has already materialised this inline image, send the WebP file rather
-            // than the original.  A missing path is normal: Telegram will download it later.
+            // than the original. A missing path is normal: Telegram will download it later.
             String path = getStringField(sendingMediaInfo, "path");
-            if (path == null || path.length() == 0) path = getStringField(sendingMediaInfo, "filePath");
+            if (path == null || path.length() == 0) {
+                path = getStringField(sendingMediaInfo, "filePath");
+            }
+
             if (path != null && replaceWithWebp(sendingMediaInfo, path, log)) {
-                log.info("Converted inline bot image to WebP");
+                log.info("[WEBP-SUCCESS] Converted inline bot image to WebP (type=" + type
+                        + ", oldMime=" + originalMime + " -> image/webp, originalPath=" + path + ")");
             } else {
-                log.info("Marked inline bot image as image/webp (download not materialised yet)");
+                log.info("[WEBP-INFO] Marked inline bot image as image/webp (type=" + type
+                        + ", oldMime=" + originalMime + ", download not materialised yet or already WebP)");
             }
         } catch (Throwable t) {
             // Never prevent a user from sending an inline result if a Telegram fork changes TLs.
-            log.warn("Inline WebP conversion failed", t);
+            log.warn("[WEBP-ERR] Inline WebP conversion failed: " + t.getMessage(), t);
         }
     }
 
@@ -57,23 +67,34 @@ final class InlineResultWebpConverter {
         if (!source.isFile() || source.length() == 0 || path.toLowerCase(Locale.ROOT).endsWith(".webp")) {
             return false;
         }
+        long startMs = System.currentTimeMillis();
+        long originalSize = source.length();
         Bitmap bitmap = BitmapFactory.decodeFile(source.getAbsolutePath());
-        if (bitmap == null) return false;
+        if (bitmap == null) {
+            log.warn("[WEBP-WARN] Could not decode source bitmap at: " + path, null);
+            return false;
+        }
         File target = new File(source.getParentFile(), source.getName() + ".webp");
         try (FileOutputStream out = new FileOutputStream(target)) {
             Bitmap.CompressFormat format = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                     ? Bitmap.CompressFormat.WEBP_LOSSLESS : Bitmap.CompressFormat.WEBP;
             if (!bitmap.compress(format, 90, out)) {
                 target.delete();
+                log.warn("[WEBP-WARN] Bitmap compression returned false for format: " + format, null);
                 return false;
             }
             if (!setStringField(info, "path", target.getAbsolutePath())) {
                 setStringField(info, "filePath", target.getAbsolutePath());
             }
+            long newSize = target.length();
+            long elapsed = System.currentTimeMillis() - startMs;
+            log.info("[WEBP-CONVERT] Transcoded " + source.getName() + " -> " + target.getName()
+                    + " (" + (originalSize / 1024) + " KB -> " + (newSize / 1024) + " KB, "
+                    + format + " format, duration: " + elapsed + " ms)");
             return true;
         } catch (Throwable t) {
             target.delete();
-            log.warn("Could not write inline WebP", t);
+            log.warn("[WEBP-ERR] Could not write inline WebP to " + target.getAbsolutePath(), t);
             return false;
         } finally {
             bitmap.recycle();
