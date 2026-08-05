@@ -22,14 +22,13 @@ final class InlineResultWebpConverter {
 
             // BotInlineResult fields are mutable in Telegram's TL implementation.
             setStringField(result, "mime_type", "image/webp");
-            setStringField(result, "type", "sticker");
 
             // Some versions put the MIME type in result.content instead of the result itself.
             Object content = getField(result, "content");
             if (content != null) setStringField(content, "mime_type", "image/webp");
 
             // If Telegram has already materialised this inline image, send the WebP file rather
-            // than the original. A missing path is normal: Telegram will download it later.
+            // than the original.  A missing path is normal: Telegram will download it later.
             String path = getStringField(sendingMediaInfo, "path");
             if (path == null || path.length() == 0) path = getStringField(sendingMediaInfo, "filePath");
             if (path != null && replaceWithWebp(sendingMediaInfo, path, log)) {
@@ -38,27 +37,8 @@ final class InlineResultWebpConverter {
                 log.info("Marked inline bot image as image/webp (download not materialised yet)");
             }
         } catch (Throwable t) {
+            // Never prevent a user from sending an inline result if a Telegram fork changes TLs.
             log.warn("Inline WebP conversion failed", t);
-        }
-    }
-
-    static void prepareBotInlineResult(Object result, XposedLog log) {
-        if (result == null || !isImageResult(result)) return;
-
-        try {
-            // Modifying type to "sticker" directly taps into Telegram's internal check switch to build
-            // it natively as a TL_documentAttributeSticker.
-            setStringField(result, "mime_type", "image/webp");
-            setStringField(result, "type", "sticker");
-
-            Object content = getField(result, "content");
-            if (content != null) {
-                setStringField(content, "mime_type", "image/webp");
-            }
-
-            log.info("Marked BotInlineResult as sticker/webp (direct hook)");
-        } catch (Throwable t) {
-            log.warn("Inline WebP conversion failed (BotInlineResult)", t);
         }
     }
 
@@ -69,7 +49,7 @@ final class InlineResultWebpConverter {
         if (mime == null && content != null) mime = getStringField(content, "mime_type");
         type = type == null ? "" : type.toLowerCase(Locale.ROOT);
         mime = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
-        return "photo".equals(type) || "image".equals(type) || "sticker".equals(type) || mime.startsWith("image/");
+        return "photo".equals(type) || "image".equals(type) || mime.startsWith("image/");
     }
 
     private static boolean replaceWithWebp(Object info, String path, XposedLog log) {

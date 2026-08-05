@@ -102,8 +102,8 @@ public class TelegramAdBlocker extends XposedModule {
     }
 
     /**
-     * Runs before Telegram consumes inline bot results. Hook covers the legacy 'sendInlineBotResult'
-     * alongside new equivalents 'prepareSendingBotContextResult' and 'prepareSendingMedia'.
+     * Runs before Telegram consumes SendingMediaInfo lists. Hook covers the legacy 'sendInlineBotResult'
+     * alongside the modern equivalent 'prepareSendingMedia'.
      */
     private void hookInlineBotResultWebp(ClassLoader cl) {
         try {
@@ -111,9 +111,7 @@ public class TelegramAdBlocker extends XposedModule {
             int hooks = 0;
             for (Method method : helper.getDeclaredMethods()) {
                 String name = method.getName();
-                if (!name.equals("sendInlineBotResult") && 
-                    !name.equals("prepareSendingBotContextResult") && 
-                    !name.equals("prepareSendingMedia")) {
+                if (!name.equals("sendInlineBotResult") && !name.equals("prepareSendingMedia")) {
                     continue;
                 }
                 
@@ -126,7 +124,7 @@ public class TelegramAdBlocker extends XposedModule {
                     for (Object argument : chain.getArgs()) {
                         if (argument == null) continue;
                         
-                        // Handled by prepareSendingMedia (passes an ArrayList<SendingMediaInfo>)
+                        // Handled by modern prepareSendingMedia (passes an ArrayList<SendingMediaInfo>)
                         if (argument instanceof java.util.ArrayList) {
                             for (Object item : (java.util.ArrayList<?>) argument) {
                                 if (item != null && hasField(item.getClass(), "inlineResult")) {
@@ -137,11 +135,6 @@ public class TelegramAdBlocker extends XposedModule {
                         // Handled by older versions passing SendingMediaInfo directly
                         else if (hasField(argument.getClass(), "inlineResult")) {
                             InlineResultWebpConverter.prepare(argument, converterLog);
-                        }
-                        // Handled by prepareSendingBotContextResult (passes BotInlineResult directly)
-                        // Checking field names natively bypasses class name obfuscation/case mismatch
-                        else if (hasField(argument.getClass(), "send_message") && hasField(argument.getClass(), "type")) {
-                            InlineResultWebpConverter.prepareBotInlineResult(argument, converterLog);
                         }
                     }
                     return chain.proceed();
