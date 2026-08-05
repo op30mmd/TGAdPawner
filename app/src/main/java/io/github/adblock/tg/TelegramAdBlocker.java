@@ -72,7 +72,7 @@ public class TelegramAdBlocker extends XposedModule {
         hookPromoSponsor(cl, hookedMethods);
         hookInlineBotResultWebp(cl, hookedMethods);
 
-        long totalElapsed = System.currentTimeMillis() - start;
+        long totalElapsed = System.currentTimeMillis() - startTime;
         logInfo("[INIT-SUMMARY] TelegramAdBlocker initialization complete for " + packageName
                 + ". Total unique methods hooked: " + hookedMethods.size()
                 + " (" + dexKitHooks + " via DexKit, " + (hookedMethods.size() - dexKitHooks) + " via Reflection fallback). "
