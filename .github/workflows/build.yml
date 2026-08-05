@@ -7,6 +7,7 @@ on:
     branches: [ "main" ]
     paths-ignore:
       - README.md
+  workflow_dispatch:
 
 jobs:
   build:
@@ -54,11 +55,35 @@ jobs:
       env:
         BUILD_TOOLS_VERSION: "35.0.0"
 
+    - name: Generate Test Keystore for PRs
+      if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+      run: |
+        keytool -genkeypair -v \
+          -keystore test-debug.keystore \
+          -alias test \
+          -keyalg RSA -keysize 2048 -validity 10000 \
+          -storepass testpassword -keypass testpassword \
+          -dname "CN=Test, OU=Test, O=Test, L=Test, S=Test, C=US"
+        echo "TEST_KEYSTORE_BASE64=$(base64 -w 0 test-debug.keystore)" >> $GITHUB_ENV
+
+    - name: Sign APK (Test Signing for PRs)
+      if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+      uses: r0adkll/sign-android-release@v1
+      id: sign_app_test
+      with:
+        releaseDirectory: app/build/outputs/apk/release
+        signingKeyBase64: ${{ env.TEST_KEYSTORE_BASE64 }}
+        alias: test
+        keyStorePassword: testpassword
+        keyPassword: testpassword
+      env:
+        BUILD_TOOLS_VERSION: "35.0.0"
+
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: TGAdPawner
-        path: ${{ steps.sign_app.outputs.signedReleaseFile || 'app/build/outputs/apk/release/app-release.apk' }}
+        path: ${{ steps.sign_app.outputs.signedReleaseFile || steps.sign_app_test.outputs.signedReleaseFile || 'app/build/outputs/apk/release/app-release.apk' }}
 
     - name: Create Release
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
