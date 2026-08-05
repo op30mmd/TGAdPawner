@@ -338,7 +338,13 @@ public final class DexKitAdFinder {
                                                Set<Method> hookedMethods, String tag) {
         int count = 0;
         try {
-            String[] methods = { "sendInlineBotResult", "prepareSendingMedia" };
+            String[] methods = {
+                    "sendInlineBotResult",
+                    "prepareSendingMedia",
+                    "prepareSendingBotInlineResult",
+                    "prepareSendingMediaInfo",
+                    "sendBotInlineResult"
+            };
             for (String mName : methods) {
                 Collection<MethodData> helperMethods = bridge.findMethod(FindMethod.create()
                         .matcher(MethodMatcher.create()
@@ -362,13 +368,19 @@ public final class DexKitAdFinder {
                                 };
                                 for (Object argument : chain.getArgs()) {
                                     if (argument == null) continue;
-                                    if (argument instanceof java.util.ArrayList) {
-                                        for (Object item : (java.util.ArrayList<?>) argument) {
-                                            if (item != null && hasField(item.getClass(), "inlineResult")) {
+                                    if (argument instanceof java.lang.Iterable) {
+                                        for (Object item : (java.lang.Iterable<?>) argument) {
+                                            if (item != null) {
                                                 InlineResultWebpConverter.prepare(item, converterLog);
                                             }
                                         }
-                                    } else if (hasField(argument.getClass(), "inlineResult")) {
+                                    } else if (argument instanceof Object[]) {
+                                        for (Object item : (Object[]) argument) {
+                                            if (item != null) {
+                                                InlineResultWebpConverter.prepare(item, converterLog);
+                                            }
+                                        }
+                                    } else {
                                         InlineResultWebpConverter.prepare(argument, converterLog);
                                     }
                                 }

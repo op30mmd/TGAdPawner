@@ -72,7 +72,7 @@ public class TelegramAdBlocker extends XposedModule {
         hookPromoSponsor(cl, hookedMethods);
         hookInlineBotResultWebp(cl, hookedMethods);
 
-        long totalElapsed = System.currentTimeMillis() - startTime;
+        long totalElapsed = System.currentTimeMillis() - start;
         logInfo("[INIT-SUMMARY] TelegramAdBlocker initialization complete for " + packageName
                 + ". Total unique methods hooked: " + hookedMethods.size()
                 + " (" + dexKitHooks + " via DexKit, " + (hookedMethods.size() - dexKitHooks) + " via Reflection fallback). "
@@ -153,16 +153,29 @@ public class TelegramAdBlocker extends XposedModule {
     }
 
     /**
-     * Runs before Telegram consumes SendingMediaInfo lists. Hook covers the legacy 'sendInlineBotResult'
-     * alongside the modern equivalent 'prepareSendingMedia'.
+     * Runs before Telegram consumes SendingMediaInfo lists. Hook covers legacy and modern inline bot sending methods.
      */
     private void hookInlineBotResultWebp(ClassLoader cl, Set<Method> hookedMethods) {
         try {
             Class<?> helper = cl.loadClass("org.telegram.messenger.SendMessagesHelper");
             int hooks = 0;
+            String[] methods = {
+                    "sendInlineBotResult",
+                    "prepareSendingMedia",
+                    "prepareSendingBotInlineResult",
+                    "prepareSendingMediaInfo",
+                    "sendBotInlineResult"
+            };
             for (Method method : helper.getDeclaredMethods()) {
                 String name = method.getName();
-                if (!name.equals("sendInlineBotResult") && !name.equals("prepareSendingMedia")) {
+                boolean matches = false;
+                for (String targetName : methods) {
+                    if (name.equals(targetName)) {
+                        matches = true;
+                        break;
+                    }
+                }
+                if (!matches) {
                     continue;
                 }
 
@@ -174,13 +187,19 @@ public class TelegramAdBlocker extends XposedModule {
 
                     for (Object argument : chain.getArgs()) {
                         if (argument == null) continue;
-                        if (argument instanceof java.util.ArrayList) {
-                            for (Object item : (java.util.ArrayList<?>) argument) {
-                                if (item != null && hasField(item.getClass(), "inlineResult")) {
+                        if (argument instanceof java.lang.Iterable) {
+                            for (Object item : (java.lang.Iterable<?>) argument) {
+                                if (item != null) {
                                     InlineResultWebpConverter.prepare(item, converterLog);
                                 }
                             }
-                        } else if (hasField(argument.getClass(), "inlineResult")) {
+                        } else if (argument instanceof Object[]) {
+                            for (Object item : (Object[]) argument) {
+                                if (item != null) {
+                                    InlineResultWebpConverter.prepare(item, converterLog);
+                                }
+                            }
+                        } else {
                             InlineResultWebpConverter.prepare(argument, converterLog);
                         }
                     }
